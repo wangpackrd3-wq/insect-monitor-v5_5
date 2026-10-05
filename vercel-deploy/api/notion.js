@@ -1,13 +1,21 @@
 import { readRaw, sameOrigin, serverToken } from './_util.js';
 const ID = '[0-9a-fA-F-]{32,36}';
 function norm(id) { return String(id || '').replace(/-/g, '').toLowerCase(); }
+// The app may hold the data-source (collection) id; Notion API 2022-06-28 needs the database id.
+function fixIds(s) {
+  const alias = norm(process.env.NOTION_DB_ALIAS), db = norm(process.env.NOTION_DB_ID);
+  if (!alias || !db) return s;
+  const dashed = alias.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5');
+  return s.split(alias).join(db).split(dashed).join(db);
+}
 export default async function handler(req, res) {
   if (!sameOrigin(req)) return res.status(403).json({ message: 'forbidden' });
-  const path = String(req.query.path || '');
+  const path = fixIds(String(req.query.path || ''));
   if (!/^[\w\-\/?=&.]+$/.test(path) || path.includes('..')) return res.status(400).json({ message: 'bad path' });
   const { token, fromServer } = serverToken(req.headers.authorization);
   if (!token) return res.status(500).json({ message: 'ยังไม่ได้ตั้งค่า NOTION_TOKEN ใน Vercel' });
-  const raw = ['GET', 'HEAD'].includes(req.method) ? null : await readRaw(req);
+  let raw = ['GET', 'HEAD'].includes(req.method) ? null : await readRaw(req);
+  if (raw && raw.length) raw = Buffer.from(fixIds(raw.toString('utf8')), 'utf8');
   if (fromServer) {
     // With the server's own token, allow only what the app needs, on its own database.
     const db = norm(process.env.NOTION_DB_ID);
